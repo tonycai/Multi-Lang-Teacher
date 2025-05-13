@@ -1,0 +1,30 @@
+{
+  "name": "infrastructure",
+  "version": "1.0.0",
+  "description": "CDK infrastructure for Multi-Lang-Teacher",
+  "main": "index.js",
+  "bin": {
+    "infrastructure": "cdk.out/build/bin/infrastructure.js"
+  },
+  "scripts": {
+    "clean": "rm -rf cdk.out/build",
+    "build": "npm run clean && tsc",
+    "watch": "tsc -w",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "cdk": "cdk",
+    "deploy": "cdk deploy --all --require-approval never",
+    "bootstrap": "cdk bootstrap"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^20.11.21",
+    "aws-cdk": "^2.88.0",
+    "aws-cdk-lib": "^2.80.0",
+    "constructs": "^10.3.0",
+    "source-map-support": "^0.5.21",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

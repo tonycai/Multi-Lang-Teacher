@@ -1,0 +1,14 @@
+{
+  "name": "multi-lang-teacher-main-logic",
+  "version": "1.0.0",
+  "description": "Main logic Lambda function for Multi-Lang-Teacher",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1550.0"
+  },
+  "author": "",
+  "license": "MIT"
+} 
