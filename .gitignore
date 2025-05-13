@@ -31,7 +31,7 @@ Thumbs.db
 # Logs
 logs
 *.log
-npm-debug.log*
+npm-debug.log
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
@@ -47,4 +47,44 @@ coverage/
 
 # AWS CDK specific
 cdk.context.json
-.cdk.staging/ 
+.cdk.staging/
+
+# Python
+*.py[cod]
+__pycache__/
+*.so
+.Python
+env/
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Deployment
+.serverless/
+.aws-sam/
+deploy-bedrock-agent.py
+deploy-bedrock-agent.sh
+
+# Environment variables and secrets
+*.pem
+credentials.json
+aws-credentials.json
+*credentials*.json
+*secret*.json
+*config*.json
+*.tfvars
+
+# Temporary files
+tmp/
+temp/
+*.tmp 
+./infrastructure/node_modules

@@ -1,0 +1,137 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Multi-Lang-Teacher API",
+    "version": "1.0.0",
+    "description": "API for interacting with the Multi-Lang-Teacher language tutor"
+  },
+  "paths": {
+    "/query": {
+      "post": {
+        "summary": "Submit a language learning query",
+        "description": "Ask a question to the language tutor about English or Japanese",
+        "operationId": "queryTutor",
+        "requestBody": {
+          "description": "Query parameters",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "The language learning question or request"
+                  },
+                  "language": {
+                    "type": "string",
+                    "description": "The language being studied (english or japanese)",
+                    "enum": ["english", "japanese", "chinese"]
+                  },
+                  "explanation_language": {
+                    "type": "string",
+                    "description": "The language for the explanation (defaults to the language being studied)",
+                    "enum": ["english", "japanese", "chinese"]
+                  },
+                  "student_id": {
+                    "type": "string",
+                    "description": "Optional student identifier for tracking progress"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "description": "Optional session identifier for continuing a conversation"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response from the language tutor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "response": {
+                      "type": "string",
+                      "description": "The tutor's response to the query"
+                    },
+                    "language": {
+                      "type": "string",
+                      "description": "The language being studied"
+                    },
+                    "explanation_language": {
+                      "type": "string",
+                      "description": "The language used for the explanation"
+                    },
+                    "session_id": {
+                      "type": "string",
+                      "description": "Session identifier for continuing the conversation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing required parameters"
+          },
+          "500": {
+            "description": "Server error processing the request"
+          }
+        }
+      }
+    },
+    "/feedback": {
+      "post": {
+        "summary": "Submit feedback about a response",
+        "description": "Provide feedback on a previous tutor response",
+        "operationId": "submitFeedback",
+        "requestBody": {
+          "description": "Feedback parameters",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["feedback", "response_id"],
+                "properties": {
+                  "feedback": {
+                    "type": "string",
+                    "description": "The feedback content"
+                  },
+                  "response_id": {
+                    "type": "string",
+                    "description": "Identifier for the response being rated"
+                  },
+                  "student_id": {
+                    "type": "string",
+                    "description": "Optional student identifier"
+                  },
+                  "rating": {
+                    "type": "number",
+                    "description": "Optional numerical rating (e.g., 1-5)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Feedback successfully received"
+          },
+          "400": {
+            "description": "Bad request - missing required parameters"
+          },
+          "500": {
+            "description": "Server error processing the feedback"
+          }
+        }
+      }
+    }
+  }
+} 

@@ -10,7 +10,14 @@ const bedrock = new AWS.BedrockRuntime();
 const METADATA_TABLE = process.env.METADATA_TABLE;
 const LEARNING_MATERIALS_BUCKET = process.env.LEARNING_MATERIALS_BUCKET;
 const PINECONE_API_KEY_SECRET_ARN = process.env.PINECONE_API_KEY_SECRET_ARN;
-const BEDROCK_MODEL_ID = 'anthropic.claude-sonnet-3-haiku-20240307-v1:0'; // Claude Sonnet Haiku model
+
+// Bedrock model configuration
+const BEDROCK_MODEL_ID = process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-sonnet-20240229-v1:0';
+const BEDROCK_MODEL_PARAMS = {
+  temperature: parseFloat(process.env.BEDROCK_TEMPERATURE || '0.7'),
+  top_p: parseFloat(process.env.BEDROCK_TOP_P || '0.9'),
+  max_tokens: parseInt(process.env.BEDROCK_MAX_TOKENS || '2000')
+};
 
 /**
  * Main handler function for the API Gateway
@@ -29,6 +36,8 @@ exports.handler = async (event) => {
       return await handleQuery(body);
     } else if (path === '/feedback') {
       return await handleFeedback(body);
+    } else if (path === '/configure') {
+      return await handleConfigure(body);
     } else {
       return formatResponse(404, { message: 'Route not found' });
     }
@@ -42,7 +51,7 @@ exports.handler = async (event) => {
  * Handle a query request
  */
 async function handleQuery(body) {
-  const { query, language, explanation_language, student_id } = body;
+  const { query, language, explanation_language, student_id, session_id, model_params } = body;
   
   if (!query) {
     return formatResponse(400, { message: 'Query is required' });
@@ -53,13 +62,27 @@ async function handleQuery(body) {
     const context = await getContextFromPinecone(query, language);
     
     // 2. Process the query with Bedrock (Claude Sonnet)
-    const bedrockResponse = await invokeBedrockModel(query, language, explanation_language, context);
+    const customModelParams = model_params || {};
+    const bedrockResponse = await invokeBedrockModel(
+      query, 
+      language, 
+      explanation_language, 
+      context,
+      session_id,
+      customModelParams
+    );
     
-    // 3. Format and return the response
+    // 3. Log the interaction for future reference if student_id is provided
+    if (student_id) {
+      await logInteraction(student_id, query, bedrockResponse, language, explanation_language, session_id);
+    }
+    
+    // 4. Format and return the response
     return formatResponse(200, {
       response: bedrockResponse,
       language: language || 'english',
-      explanation_language: explanation_language || language || 'english'
+      explanation_language: explanation_language || language || 'english',
+      session_id: session_id
     });
   } catch (error) {
     console.error('Error handling query:', error);
@@ -71,7 +94,7 @@ async function handleQuery(body) {
  * Handle a feedback request
  */
 async function handleFeedback(body) {
-  const { feedback, response_id, student_id } = body;
+  const { feedback, response_id, student_id, rating } = body;
   
   if (!feedback || !response_id) {
     return formatResponse(400, { message: 'Feedback and response_id are required' });
@@ -86,6 +109,7 @@ async function handleFeedback(body) {
         feedback,
         response_id,
         student_id: student_id || 'anonymous',
+        rating: rating || null,
         timestamp: new Date().toISOString()
       }
     }).promise();
@@ -95,6 +119,32 @@ async function handleFeedback(body) {
     console.error('Error handling feedback:', error);
     return formatResponse(500, { message: 'Error storing your feedback', error: error.message });
   }
+}
+
+/**
+ * Handle configuration changes for the agent
+ */
+async function handleConfigure(body) {
+  const { model_id, temperature, top_p, max_tokens } = body;
+  
+  if (!model_id && !temperature && !top_p && !max_tokens) {
+    return formatResponse(400, { message: 'At least one configuration parameter is required' });
+  }
+  
+  // This is a simple immediate configuration - in a production system
+  // you would likely store these in a database or parameter store
+  const currentConfig = {
+    model_id: BEDROCK_MODEL_ID,
+    temperature: BEDROCK_MODEL_PARAMS.temperature,
+    top_p: BEDROCK_MODEL_PARAMS.top_p,
+    max_tokens: BEDROCK_MODEL_PARAMS.max_tokens
+  };
+  
+  return formatResponse(200, { 
+    message: 'Configuration information',
+    current_config: currentConfig,
+    note: 'To change configuration permanently, update the environment variables in the Lambda function.'
+  });
 }
 
 /**
@@ -128,43 +178,100 @@ async function getContextFromPinecone(query, language) {
 }
 
 /**
+ * Log interaction for future reference
+ */
+async function logInteraction(student_id, query, response, language, explanation_language, session_id) {
+  try {
+    const interaction_id = `interaction_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    
+    await dynamodb.put({
+      TableName: METADATA_TABLE,
+      Item: {
+        id: interaction_id,
+        student_id,
+        query,
+        response,
+        language: language || 'english',
+        explanation_language: explanation_language || language || 'english',
+        session_id: session_id || interaction_id,
+        timestamp: new Date().toISOString()
+      }
+    }).promise();
+  } catch (error) {
+    console.error('Error logging interaction:', error);
+    // Don't fail the main flow if logging fails
+  }
+}
+
+/**
  * Invoke the Bedrock model (Claude Sonnet)
  */
-async function invokeBedrockModel(query, language, explanation_language, context) {
-  // Create the prompt for Claude Sonnet
-  const prompt = createPrompt(query, language, explanation_language, context);
+async function invokeBedrockModel(query, language, explanation_language, context, session_id, customModelParams = {}) {
+  // Create the prompt for Claude
+  const prompt = createPrompt(query, language, explanation_language, context, session_id);
   
-  // Invoke Claude Sonnet via Bedrock
+  // Configure model parameters
+  const modelParams = {
+    temperature: customModelParams.temperature ?? BEDROCK_MODEL_PARAMS.temperature,
+    top_p: customModelParams.top_p ?? BEDROCK_MODEL_PARAMS.top_p,
+    max_tokens: customModelParams.max_tokens ?? BEDROCK_MODEL_PARAMS.max_tokens
+  };
+  
+  // Use custom model if specified, otherwise use default
+  const modelId = customModelParams.model_id ?? BEDROCK_MODEL_ID;
+  
+  // Invoke Claude via Bedrock
   try {
+    // Log the prompt for debugging
+    console.log(`Invoking model ${modelId} with prompt:`, prompt.substring(0, 100) + '...');
+    
+    const requestBody = {
+      anthropic_version: 'bedrock-2023-05-31',
+      max_tokens: modelParams.max_tokens,
+      temperature: modelParams.temperature,
+      top_p: modelParams.top_p,
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ]
+    };
+    
+    // Add system message if session ID is provided for continuity
+    if (session_id) {
+      requestBody.system = "You are a helpful, accurate, and supportive language tutor for students from mainland China learning foreign languages. You provide personalized guidance, clear explanations, and follow up on previous interactions in the most helpful way.";
+    }
+    
     const response = await bedrock.invokeModel({
-      modelId: BEDROCK_MODEL_ID,
+      modelId,
       contentType: 'application/json',
       accept: 'application/json',
-      body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 2000,
-        temperature: 0.7,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      })
+      body: JSON.stringify(requestBody)
     }).promise();
     
     const responseBody = JSON.parse(Buffer.from(response.body).toString());
     return responseBody.content[0].text;
   } catch (error) {
     console.error('Error invoking Bedrock model:', error);
-    throw new Error(`Error invoking language model: ${error.message}`);
+    
+    // Handle specific Bedrock errors
+    if (error.code === 'ModelTimeoutException') {
+      throw new Error('The language model took too long to respond. Please try a shorter query.');
+    } else if (error.code === 'ValidationException') {
+      throw new Error('Invalid request to the language model. Please check your query and try again.');
+    } else if (error.code === 'ModelNotReadyException') {
+      throw new Error('The language model is currently not available. Please try again later.');
+    } else {
+      throw new Error(`Error invoking language model: ${error.message}`);
+    }
   }
 }
 
 /**
  * Create a prompt for the language model
  */
-function createPrompt(query, language, explanation_language, context) {
+function createPrompt(query, language, explanation_language, context, session_id) {
   const targetLanguage = language || 'english';
   const explainLanguage = explanation_language || targetLanguage || 'english';
   
@@ -177,7 +284,7 @@ function createPrompt(query, language, explanation_language, context) {
   
   // Base prompt with system instructions
   let prompt = `You are a helpful, accurate and supportive language tutor for students from mainland China learning ${targetLanguage}. 
-You provide clear explanations and examples. The student's primary language is Simple Chinese (简体中文).
+You provide clear explanations, examples, and personalized guidance. The student's primary language is Simple Chinese (简体中文).
 
 `;
 
@@ -185,15 +292,19 @@ You provide clear explanations and examples. The student's primary language is S
   if (targetLanguage.toLowerCase() === 'english') {
     prompt += `When explaining English concepts, you should provide:
 1. Clear explanations in ${explainLanguage}
-2. Example sentences demonstrating usage
-3. If requested, pronunciation guidance using pinyin approximations
+2. Relevant example sentences demonstrating proper usage
+3. Common mistakes made by Chinese speakers learning English and how to avoid them
+4. If pronunciation is discussed, provide pinyin approximations that would help Chinese speakers
+5. Cultural context when relevant to language usage
 `;
   } else if (targetLanguage.toLowerCase() === 'japanese') {
     prompt += `When explaining Japanese concepts, you should provide:
 1. Clear explanations in ${explainLanguage}
-2. Example sentences demonstrating usage
-3. If requested, pronunciation guidance with Chinese phonetic approximations
-4. Appropriate kanji usage with furigana when helpful
+2. Example sentences demonstrating proper usage with kanji, hiragana, and katakana as appropriate
+3. Common mistakes made by Chinese speakers learning Japanese and how to avoid them
+4. If pronunciation is discussed, provide Chinese phonetic approximations
+5. Appropriate kanji usage with furigana when helpful
+6. Cultural context when relevant to language usage
 `;
   }
 
@@ -203,6 +314,11 @@ You provide clear explanations and examples. The student's primary language is S
     prompt += ' (简体中文)';
   }
   prompt += '.\n\n';
+
+  // Add session context if available
+  if (session_id) {
+    prompt += `This is part of an ongoing tutoring session (${session_id}). If this follows previous questions, make sure your response takes the conversation context into account.\n\n`;
+  }
 
   // Add context from Pinecone if available
   if (context && context.length > 0) {
@@ -222,6 +338,9 @@ You provide clear explanations and examples. The student's primary language is S
     prompt += ' (简体中文)';
   }
   prompt += '.\n';
+  
+  // Add specific formatting instructions
+  prompt += `Format your response in a clear, structured way with appropriate headings and bullet points when needed. If explaining grammar points, include a "Practice" section with 1-2 simple exercises to help reinforce learning.\n`;
 
   return prompt;
 }
